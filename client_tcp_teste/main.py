@@ -4,7 +4,7 @@ import time
 import json
 from datetime import datetime, timedelta
 
-HOST = "192.168.0.103"
+HOST = "192.168.0.121"
 PORT = 5000
 
 def generate_schedules():
@@ -67,24 +67,32 @@ def send_schedule_to_client(conn):
             conn.sendall(b"<START>")
             conn.sendall(data_str.encode('utf-8'))
             conn.sendall(b"<END>")
+
+          
+            try:
+                ack = conn.recv(1024)
+                if ack.decode('utf-8') == "<ACK>":
+                    print("enviando proximo")
+                else:
+                    break
+            except socket.timeout:
+                break
+            except Exception as e:
+                break    
+            
             time.sleep(0.1)
     
         time.sleep(60)
 
 def handle_client(conn, addr):
     print(f"Cliente conectado: {addr}")
-    try:
-        conn.sendall(b"ACK")
-        
+    try:        
         update_thread = threading.Thread(target=send_schedule_to_client, args=
                                          (conn,), daemon=True)
         update_thread.start()
         
         while True:
-            data = conn.recv(1024)
-            if not data:
-                break
-            print(f"[{addr}] Dados recebidos: {data.decode()}")
+            pass
     except Exception as e:
         print(f"Erro com {addr}: {e}")
     finally:

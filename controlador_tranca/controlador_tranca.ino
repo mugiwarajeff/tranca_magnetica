@@ -1,12 +1,13 @@
-//Armazenamento Interno
-//Armazenamento SD Card
-//Input do teclado
-//Recebimento de dados pelo TCP
-//Logica de valicação da tranca
-//Relogio Interno
+//Armazenamento Interno - OK
+//Armazenamento SD Card - OK
+//Input do teclado - OK
+//Recebimento de dados pelo TCP - OK / Discussão com professor Camilo, atualizaçãao nao pode ser feita em periodo de aula
+//Lembrar de colocar no artigo problemas relacionados a variaveis e problemas de memoria
+//
+//Relogio Interno - OK
+//Logica de valicação da tranca 
 //Eletronica para Liberar a Tranca
-//Incrementar com bit shifting and bit masking
-//import para acessar memoria interna
+
 
 //Imports para trabalhar com SD Card
 #include <SPI.h>
@@ -22,190 +23,30 @@
 #include <Wire.h>
 #include <RTClib.h>
 
-//#include <stdlib.h>
-
 RTC_DS3231 rtc; 
 
-/*
-int freeMemory() {
-  extern int __heap_start, *__brkval;
-  int free_mem;
-  if ((int)__brkval == 0) {
-    free_mem = ((int)&free_mem) - ((int)&__heap_start);
-  } else {
-    free_mem = ((int)&free_mem) - ((int)__brkval);
-  }
-  return free_mem;
-}
-*/
-
-void startRTC(){
-  if(!rtc.begin()){
-    Serial.println("RTC não encontrado");
-    while(1);
-  }
-
-  //Serial.println("RTC encontrado");
-  //rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
-}
 
 //Ethernet
 byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED }; 
-IPAddress ip(192,168,0,120);                        //IP Local Arduino
-IPAddress server(192,168,0,103);                    //IP Servidor Python
+IPAddress ip(192,168,0,124);                        //IP Local Arduino
+IPAddress server(192,168,0,121);                    //IP Servidor Python
 int port = 5000;
-String incomingData = "";
-bool receivingJson = false;
 EthernetClient client;
 
-File permFile;
+// Variáveis para receber dados do servidor
+char incomingBuffer[64];
+short dataPointer = 0;
+const char startTag[] = "<START>";
+const char endTag[] = "<END>";
+const int startTagLen = strlen(startTag);
+const int endTagLen = strlen(endTag);
 
-
-void startEthernet(){
-  Ethernet.begin(mac, ip);
-
-  delay(1000);
-
-
- if(client.connect(server, port)){
-  Serial.println("Conectado ao servidor!");
-
-  while(client.connected()){
-    handleEthernetCommunication();
-  }
- } else {
-  Serial.println("Falha na conexão");
- }
-
-}
-
-void handleDisconnect(){
-  if(!client.connected()){
-    Serial.println("Desconectado. Reconectando...");
-    if(client.connect(server, port)){
-      
-      Serial.println("Reconectado");
-    
-      while(client.connected()){
-        handleEthernetCommunication();
-      }
-    } else {
-      Serial.println("Falha em reconexão...");
-    }
-    delay(5000);
-  }
-}
-
-
-
-void handleEthernetCommunication(){
-
-   while(!startFile()){
-      delay(1000);
-  }
-
-  while(client.available()){
-    char c = client.read();
-
-    if(!receivingJson){
-      incomingData += c;
-      if (incomingData.endsWith("<START>")) {
-        incomingData = "";  // Limpa para começar a receber JSON
-        receivingJson = true;
-      } else if (incomingData.length() > 100) {
-        incomingData = "";  // Evita lixo no início
-      }
-    }
-    else { //recebendo JSON 
-      incomingData += c;
-       if (incomingData.endsWith("<END>")) {
-        incomingData.replace("<END>", "");
-    
-        writeToPermissionFile(incomingData);
-        delay(100);
-        receivingJson = false;
-        incomingData = "";
-      }
-    }
-
-    
-  }
-
-  permFile.close();
-}
 
 //SD CARD
 const byte sdCardPin = 4;
-
 bool sdBeginResult = false;
-
-void startSDCard(){
-  sdBeginResult = SD.begin(sdCardPin);
-
-  if(!sdBeginResult){
-    Serial.println("Falha ao inicializar o SD card!");
-    return;
-  }
-   Serial.println("SD card inicializado com sucesso!");
-
-
-/*  Serial.println(SD.exists("/perm.txt"));
-
-  File file = SD.open("/perm.txt", FILE_WRITE);
-  
-  if (!file) {
-    Serial.println("Erro ao abrir arquivo!");
-    return;
-  } 
-
-  file.print("Teste de Escrita");
-
-  */
-}
-
-
-bool startFile(){
-  while(!sdBeginResult){
-    startSDCard();
-   delay(1000);
-  }
-
-  Serial.println(SD.exists("per.txt"));
-  permFile = SD.open("per.txt", FILE_WRITE);
-
-  if (!permFile) {
-    Serial.println("Erro ao abrir arquivo!");
-    permFile.close();
-    return false;
-  }
-
-  Serial.println(permFile);
-  return true;
-}
-
-void writeToPermissionFile(String data) {
-  
-  if(data == ""){
-    return;
-  }
-
-  // Divide a string pelos separadores
-  int firstComma = data.indexOf(',');
-  int index = data.substring(0, firstComma).toInt();
-  Serial.println(data);
-  
-  // Se índice for 0, limpa o arquivo
-  if (index == 0) {
-    permFile.seek(0); // Posiciona no início
-    permFile.print(""); // Limpa o conteúdo
-    Serial.println("limpando arquivo");
-  }
-
-  // Escreve a linha
-  permFile.println(data);
-  Serial.println("Dados escritos: ");
- 
-}
+const char* permissionFile = "per.txt";
+File permFile; // Variável global para o arquivo de permissões
 
 //KEYPAD
 const byte ROWS = 4;
@@ -217,16 +58,153 @@ char keys[ROWS][COLS] = {
   {'7', '8', '9'},
   {'*', '0', '#'}
   };
-
 byte rowPins[ROWS] = {3, 8, 7, 5}; // Pinos das linhas
 byte colPins[COLS] = {4, 2, 6}; 
-
 Keypad keypad = Keypad(makeKeymap(keys), rowPins,colPins, ROWS, COLS);
-
 const byte maxDisplayNum = 16;
 char displayfeedback[maxDisplayNum] = "";
-int feedbackPointer = 0;
+short feedbackPointer = 0;
 const byte pinled = 13;
+
+
+void startRTC(){
+  if(!rtc.begin()){
+    Serial.println("RTC não encontrado");
+    while(1);
+  }
+
+  //Serial.println("RTC encontrado");
+  //rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+}
+
+
+void startEthernet(){
+  Serial.println("Iniciando Ethernet...");
+  Ethernet.begin(mac, ip);
+  delay(1000);
+  if(client.connect(server, port)){
+    Serial.println("Conectado ao servidor!");
+  } else {
+    Serial.println("Falha na conexao");
+  }
+}
+
+void handleDisconnect(){
+  if(!client.connected()){
+    Serial.println("Desconectado. Reconectando...");
+    client.stop();
+    delay(1000);
+    startEthernet();
+  }
+}
+
+void processAndSavePacket(char* data) {
+    char* commaPtr = strchr(data, ',');
+
+    if (commaPtr == NULL) {
+      Serial.println("Formato de dados invalido.");
+      return;
+    }
+
+    // Extrai o índice
+    *commaPtr = '\0'; // Temporariamente termina a string no local da vírgula
+    int index = atoi(data);
+    *commaPtr = ','; // Restaura a vírgula
+
+    Serial.println(data);
+     Serial.println(index);
+
+ // Se o índice for 0, apaga o arquivo e reabre em modo de escrita
+    
+    if (index == 0) {
+      if (SD.exists(permissionFile)) {
+        SD.remove(permissionFile);
+        Serial.println("Arquivo per.txt apagado.");
+      }
+      
+      // Fecha o arquivo se ele estiver aberto para reabrir em modo de escrita
+
+   
+      if(permFile){
+        permFile.close();
+      }
+      permFile = SD.open(permissionFile, FILE_WRITE);
+      
+    }  else {
+      // Abre o arquivo em modo de append se não estiver aberto
+      if(!permFile){
+         permFile = SD.open(permissionFile, FILE_WRITE);
+      }
+    }
+
+    
+    
+    if (permFile) {
+      permFile.println(data);
+      permFile.flush(); // Garante que os dados sejam gravados no SD
+      Serial.println("Dados escritos no arquivo.");
+    } else {
+      Serial.println("Erro ao abrir/escrever no arquivo!");
+    }
+}
+
+
+void handleEthernetCommunication(){
+  
+  // Lê apenas um byte por vez
+  while (client.available()) {
+    char c = client.read();
+
+    // Adiciona o caractere ao buffer
+    if (dataPointer < sizeof(incomingBuffer) - 1) {
+      incomingBuffer[dataPointer++] = c;
+      incomingBuffer[dataPointer] = '\0'; // Termina a C-string
+    }
+
+    // Procura por <START> e <END> no buffer usando C-strings
+    char* startPtr = strstr(incomingBuffer, startTag);
+    char* endPtr = strstr(incomingBuffer, endTag);
+    // Se um pacote completo foi encontrado
+    if (startPtr != NULL && endPtr != NULL && endPtr > startPtr) {
+      // Extrai a mensagem completa sem as tags
+      *endPtr = '\0';
+      char* payloadPtr = startPtr + startTagLen;
+
+      Serial.print("Pacote completo recebido: ");
+      Serial.println(payloadPtr);
+      
+      // Processa e salva o pacote
+      processAndSavePacket(payloadPtr);
+      
+      // Envia o ACK de volta para o servidor
+      client.write("<ACK>");
+      Serial.println("ACK enviado ao servidor.");
+      
+      // Limpa o buffer para a próxima mensagem, movendo os dados restantes para o início
+      int remainingLen = strlen(endPtr + endTagLen);
+      memmove(incomingBuffer, endPtr + endTagLen, remainingLen + 1);
+      dataPointer = remainingLen;
+    }
+    
+    // Limpeza de buffer de segurança para evitar estouro de memória
+    if(dataPointer >= sizeof(incomingBuffer) -1){
+        Serial.println("Buffer cheio, limpando...");
+        memset(incomingBuffer, 0, sizeof(incomingBuffer));
+        dataPointer = 0;
+    }
+  } 
+}
+
+void startSDCard(){
+  sdBeginResult = SD.begin(sdCardPin);
+
+  if(!sdBeginResult){
+    Serial.println("Falha ao inicializar o SD card!");
+    return;
+  }
+   Serial.println("SD card inicializado com sucesso!");
+}
+
 
 
 void callkeypadInput(){
@@ -284,14 +262,16 @@ void clearFeedback(){
 void setup() {
   Serial.begin(9600);
   Serial.println("Iniciando Arduino");
-  //startRTC();
-  startSDCard();
 
+  startSDCard();
+  //startRTC();
   delay(1500);
   startEthernet();
+ 
 }
 
 void loop() {
+  handleEthernetCommunication();
   handleDisconnect();
   //callkeypadInput();
 }
