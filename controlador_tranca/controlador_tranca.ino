@@ -102,7 +102,6 @@ void processAndSavePacket(char* data) {
     char* commaPtr = strchr(data, ',');
 
     if (commaPtr == NULL) {
-      Serial.println("Formato de dados invalido.");
       return;
     }
 
@@ -119,7 +118,6 @@ void processAndSavePacket(char* data) {
     if (index == 0) {
       if (SD.exists(permissionFile)) {
         SD.remove(permissionFile);
-        Serial.println("Arquivo per.txt apagado.");
       }
       
       // Fecha o arquivo se ele estiver aberto para reabrir em modo de escrita
@@ -142,15 +140,12 @@ void processAndSavePacket(char* data) {
     if (permFile) {
       permFile.println(data);
       permFile.flush(); // Garante que os dados sejam gravados no SD
-      Serial.println("Dados escritos no arquivo.");
-    } else {
-      Serial.println("Erro ao abrir/escrever no arquivo!");
-    }
+
+    } 
 }
 
 
 void handleEthernetCommunication(){
-  
   // Lê apenas um byte por vez
   while (client.available()) {
     char c = client.read();
@@ -170,7 +165,6 @@ void handleEthernetCommunication(){
       *endPtr = '\0';
       char* payloadPtr = startPtr + startTagLen;
 
-      Serial.print("Pacote completo recebido: ");
       Serial.println(payloadPtr);
       
       // Processa e salva o pacote
@@ -178,31 +172,102 @@ void handleEthernetCommunication(){
       
       // Envia o ACK de volta para o servidor
       client.write("<ACK>");
-      Serial.println("ACK enviado ao servidor.");
-      
       // Limpa o buffer para a próxima mensagem, movendo os dados restantes para o início
       int remainingLen = strlen(endPtr + endTagLen);
       memmove(incomingBuffer, endPtr + endTagLen, remainingLen + 1);
       dataPointer = remainingLen;
+
+      Serial.println("Validação de senha:" + validatePin(1234));
+
+
     }
     
     // Limpeza de buffer de segurança para evitar estouro de memória
     if(dataPointer >= sizeof(incomingBuffer) -1){
-        Serial.println("Buffer cheio, limpando...");
         memset(incomingBuffer, 0, sizeof(incomingBuffer));
         dataPointer = 0;
     }
   } 
 }
 
+bool validatePin(const char* pin) {
+    permFile = SD.open(permissionFile, FILE_READ);
+    
+    if (!permFile) {
+        return false;
+    }
+
+    char lineBuffer[64];
+    short bufferPointer = 0;
+    
+    // Leitura do arquivo linha por linha
+    while (permFile.available()) {
+        char c = permFile.read();
+
+        if (c == '\n' || c == '\r') {
+            lineBuffer[bufferPointer] = '\0';
+            
+            // Procura pela segunda virgula
+            char* firstComma = strchr(lineBuffer, ',');
+            if (firstComma) {
+                char* secondComma = strchr(firstComma + 1, ',');
+                
+                if (secondComma) {
+                    *secondComma = '\0';
+                    const char* storedPin = firstComma + 1;
+                    
+                    // Compara a senha armazenada com a senha de entrada
+                    if (strcmp(storedPin, pin) == 0) {
+                        permFile.close();
+                        Serial.println("senha valida");
+                        return true;
+                    }
+                }
+            }
+
+            bufferPointer = 0;
+            memset(lineBuffer, 0, sizeof(lineBuffer));
+
+        } else {
+            if (bufferPointer < sizeof(lineBuffer) - 1) {
+                lineBuffer[bufferPointer++] = c;
+            } else {
+                // Buffer cheio, reseta
+                bufferPointer = 0;
+                memset(lineBuffer, 0, sizeof(lineBuffer));
+            }
+        }
+    }
+    
+    // Processa a ultima linha se nao terminar com \n
+    if (bufferPointer > 0) {
+        lineBuffer[bufferPointer] = '\0';
+        char* firstComma = strchr(lineBuffer, ',');
+        if (firstComma) {
+            char* secondComma = strchr(firstComma + 1, ',');
+            if (secondComma) {
+                *secondComma = '\0';
+                const char* storedPin = firstComma + 1;
+                if (strcmp(storedPin, pin) == 0) {
+                    permFile.close();
+                     Serial.println("senha valida");
+                    return true;
+                }
+            }
+        }
+    }
+
+    permFile.close();
+     Serial.println("senha invalida");
+    return false;
+}
+
 void startSDCard(){
   sdBeginResult = SD.begin(sdCardPin);
 
   if(!sdBeginResult){
-    Serial.println("Falha ao inicializar o SD card!");
     return;
   }
-   Serial.println("SD card inicializado com sucesso!");
 }
 
 
@@ -212,7 +277,6 @@ void callkeypadInput(){
 
   if(key){
     handleKey(key);
-    Serial.print("Display atual: ");
     Serial.println(displayfeedback);
   }
 }
@@ -243,7 +307,6 @@ void removeLastKey(){
 }
 
 void startValidation(){
-  Serial.println("start validation");
   pinMode(pinled, OUTPUT);
   
   digitalWrite(pinled, HIGH);
@@ -261,7 +324,6 @@ void clearFeedback(){
 
 void setup() {
   Serial.begin(9600);
-  Serial.println("Iniciando Arduino");
 
   startSDCard();
   //startRTC();
@@ -272,6 +334,7 @@ void setup() {
 
 void loop() {
   handleEthernetCommunication();
+
   handleDisconnect();
   //callkeypadInput();
 }
