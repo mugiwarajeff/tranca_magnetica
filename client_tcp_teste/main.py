@@ -2,24 +2,48 @@ import socket
 import threading
 import time
 import json
+import itertools
 from datetime import datetime, timedelta
 
 HOST = "192.168.0.121"
 PORT = 5000
 
-def generate_schedules():
-    index = 0
-    schedules = []
-    
-    # Configurações fixas
-    user_id = "jeffersonc"
-    password = "1234"
-    day = 26
-    month = 11
-    year = 24
 
-# Gera agendamentos a cada 2 horas (0h, 2h, 4h...22h)
+
+def generate_schedules():
+    schedules = []
+    # LISTA DE IDs VÁLIDOS (6 dígitos, como solicitado)
+    # Use IDs que correspondem aos usuários reais
+    pin_ids_validos = [
+        "100001", 
+        "200002", 
+        "300003", 
+        "400004",
+        "500005", 
+        "600006", 
+        "700007", 
+        "800008",
+        "900009", 
+        "010101", 
+        "020202", 
+        "030303"
+    ]
+    
+    # Usamos o itertools.cycle para garantir que teremos um ID para cada agendamento
+    # Se o número de agendamentos for maior que o número de IDs, a lista de IDs se repete.
+    id_iterator = itertools.cycle(pin_ids_validos)
+    
+    # Configurações fixas para o agendamento
+    day = 3
+    month = 10
+    year = 25
+
+    # Gera agendamentos a cada 2 horas (0h, 2h, 4h...22h) - 12 iterações
     for start_hour in range(0, 24, 2):
+        
+        # Pega o próximo ID da lista
+        current_pin_id = next(id_iterator)
+        
         end_hour = start_hour + 2
         
         # Ajusta para o caso da última janela (22h-0h)
@@ -27,19 +51,17 @@ def generate_schedules():
             end_hour = 0
         
         schedule = {
-            'index': index,
-            'userId': user_id,
-            'password': password,
-            'startHour': start_hour,
+            # O PIN/ID de 6 dígitos agora é o primeiro campo
+            'pincode': current_pin_id, 
+            'startHour': 10,
             'startMinute': 0,
-            'endHour': end_hour,
+            'endHour': 13,
             'endMinute': 0,
             'day': day,
             'month': month,
             'year': year
         }
         schedules.append(schedule)
-        index += 1
 
     return schedules
 
@@ -50,11 +72,13 @@ def send_schedule_to_client(conn):
     
         print(all_schedules)
 
+        conn.sendall(b"<CLEAN>")
+
+        time.sleep(1)
+
         for schedule in all_schedules:
             data_str = (
-                f"{schedule['index']},"
-                f"{schedule['userId']},"
-                f"{schedule['password']},"
+                f"{schedule['pincode']},"
                 f"{schedule['startHour']},"
                 f"{schedule['startMinute']},"
                 f"{schedule['endHour']},"
