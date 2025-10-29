@@ -5,9 +5,24 @@ import json
 import itertools
 from datetime import datetime, timedelta
 
-HOST = "192.168.0.121"
+HOST = "192.168.0.103"
 PORT = 5000
 
+# Horário comercial para permitir o envio de agendamentos ao Arduino
+START_HOUR = 11
+END_HOUR = 14 
+
+def is_scheduled_hour():
+    """Verifica se a hora atual está dentro do horário comercial definido."""
+    now = datetime.now()
+    current_hour = now.hour
+    
+    if START_HOUR <= END_HOUR:
+        # Horário normal (ex: 8h às 18h)
+        return START_HOUR <= current_hour < END_HOUR
+    else:
+        # Horário noturno (ex: 22h às 6h)
+        return current_hour >= START_HOUR or current_hour < END_HOUR
 
 
 def generate_schedules():
@@ -33,10 +48,12 @@ def generate_schedules():
     # Se o número de agendamentos for maior que o número de IDs, a lista de IDs se repete.
     id_iterator = itertools.cycle(pin_ids_validos)
     
-    # Configurações fixas para o agendamento
-    day = 3
-    month = 10
-    year = 25
+    # 1. Configurações Dinâmicas de Data
+    now = datetime.now()
+    day = now.day
+    month = now.month
+    # Pega os dois últimos dígitos do ano (ex: 2025 -> 25)
+    year = now.year % 100 
 
     # Gera agendamentos a cada 2 horas (0h, 2h, 4h...22h) - 12 iterações
     for start_hour in range(0, 24, 2):
@@ -53,7 +70,7 @@ def generate_schedules():
         schedule = {
             # O PIN/ID de 6 dígitos agora é o primeiro campo
             'pincode': current_pin_id, 
-            'startHour': 10,
+            'startHour': 8,
             'startMinute': 0,
             'endHour': 13,
             'endMinute': 0,
@@ -72,45 +89,60 @@ def send_schedule_to_client(conn):
     
         print(all_schedules)
 
-        conn.sendall(b"<CLEAN>")
+        try:
 
-        time.sleep(1)
+            conn.sendall(b"<CLEAN>")
 
-        for schedule in all_schedules:
-            data_str = (
-                f"{schedule['pincode']},"
-                f"{schedule['startHour']},"
-                f"{schedule['startMinute']},"
-                f"{schedule['endHour']},"
-                f"{schedule['endMinute']},"
-                f"{schedule['day']},"
-                f"{schedule['month']},"
-                f"{schedule['year']}"
-            )
+            time.sleep(1)
 
-            conn.sendall(b"<START>")
-            conn.sendall(data_str.encode('utf-8'))
-            conn.sendall(b"<END>")
+            for schedule in all_schedules:
+                data_str = (
+                    f"{schedule['pincode']},"
+                    f"{schedule['startHour']},"
+                    f"{schedule['startMinute']},"
+                    f"{schedule['endHour']},"
+                    f"{schedule['endMinute']},"
+                    f"{schedule['day']},"
+                    f"{schedule['month']},"
+                    f"{schedule['year']}"
+                )
 
-          
-            try:
-                ack = conn.recv(1024)
-                if ack.decode('utf-8') == "<ACK>":
-                    print("enviando proximo")
-                else:
-                    break
-            except socket.timeout:
-                break
-            except Exception as e:
-                break    
+                conn.sendall(b"<START>")
+                conn.sendall(data_str.encode('utf-8'))
+                conn.sendall(b"<END>")
+
             
-            time.sleep(0.1)
-    
-        time.sleep(60)
+                try:
+                    ack = conn.recv(1024)
+                    if ack.decode('utf-8') == "<ACK>":
+                        print("enviando proximo")
+                    else:
+                        break
+                except socket.timeout:
+                    break
+                except Exception as e:
+                    break    
+                
+                
+                time.sleep(0.1)
+
+            conn.sendall(b"<ENDTX>")
+            time.sleep(60)
+        except ConnectionAbortedError as e:
+            print(f"ERRO DE CONEXÃO: Cliente desconectado abruptamente (WinError 10053). Encerrando thread.")
+            break
+        except socket.timeout:
+         
+            break
+        except Exception as e:
+           
+            break 
 
 def handle_client(conn, addr):
     print(f"Cliente conectado: {addr}")
     try:        
+        
+
         update_thread = threading.Thread(target=send_schedule_to_client, args=
                                          (conn,), daemon=True)
         update_thread.start()
@@ -129,11 +161,13 @@ def main():
         s.listen()
         print(f"Servidor TCP aguardando conexões na porta {PORT}...")
 
-        while True:
-            conn, addr = s.accept()
 
-            client_thread = threading.Thread(target=handle_client, args=(conn, addr))
-            client_thread.start()
+
+        while True:
+            if(is_scheduled_hour()):
+                conn, addr = s.accept()
+                client_thread = threading.Thread(target=handle_client, args=(conn, addr))
+                client_thread.start()
 
 if __name__ == "__main__":
     main()            
