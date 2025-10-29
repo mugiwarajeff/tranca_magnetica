@@ -3,18 +3,20 @@
 //Input do teclado - OK
 //Recebimento de dados pelo TCP - OK / Discussão com professor Camilo, atualizaçãao nao pode ser feita em periodo de aula
 //Lembrar de colocar no artigo problemas relacionados a variaveis e problemas de memoria
-//
 //Relogio Interno - OK
-//Logica de valicação da tranca 
-//Eletronica para Liberar a Tranca
+//Logica de valicação da tranca - OK
+//Eletronica para Liberar a Tranca - OK
 
 //#define DEBUG_TCP
 //#define DEBUG_PIN_VALIDATION
 //#define DEBUG_RTC
+//#define DEBUG_LOCK
 #define RTC_ON
-//#define TCP_ON
+#define TCP_ON
 #define KEYBOARD_ON
 #define SDCARD_ON
+#define LOCK_ON
+#define SCHEDULEDMODE
 
 //Imports para trabalhar com SD Card
 #include <SPI.h>
@@ -36,35 +38,44 @@ byte currentHour;
 byte currentMinute; 
 byte currentDay;    
 byte currentMonth;  
-short currentYear;
+byte currentYear;
 
+#ifdef SCHEDULEDMODE
+    bool hasExecutedToday = false; 
+    const byte TARGET_HOUR = 11;
+#endif
 
+ 
 //Ethernet
 byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED }; 
 IPAddress ip(192,168,0,124);                        //IP Local Arduino
-IPAddress server(192,168,0,121);                    //IP Servidor Python
-int port = 5000;
+IPAddress server(192,168,0,103);                    //IP Servidor Python
+short port = 5000;
 EthernetClient client;
 
 // Variáveis para receber dados do servidor
-char incomingBuffer[64];
+char incomingBuffer[38];
 short dataPointer = 0;
-const char startTag[] = "<START>";
-const char endTag[] = "<END>";
-const char cleanTag[] = "<CLEAN>";
-const int startTagLen = strlen(startTag);
-const int endTagLen = strlen(endTag);
-const int cleanTagLen = strlen(cleanTag); 
+const char startTag[] PROGMEM = "<START>"; //lembrar de colocar planilha de solução
+const char endTag[] PROGMEM = "<END>";
+const char cleanTag[] PROGMEM = "<CLEAN>";
+const char finalTag[] PROGMEM = "<ENDTX>";
+const byte startTagLen = strlen_P(startTag);
+const byte endTagLen = strlen_P(endTag);
+const byte cleanTagLen = strlen_P(cleanTag); 
+const byte finalTagLen = strlen_P(finalTag);
 
 
 //SD CARD
 const byte sdCardPin = 4;
+
 bool sdBeginResult = false;
-const char* permissionFile = "per.txt";
+const char permissionFile[] PROGMEM = "per.txt";
+const byte permissionFileLen = strlen_P(permissionFile);
 File permFile; // Variável global para o arquivo de permissões
 
 //lock
-const byte lockPin = 10; 
+const byte lockPin = A1; 
 
 //KEYPAD
 const byte ROWS = 4;
@@ -86,15 +97,21 @@ short feedbackPointer = 0;
 void activateLock() {
     // 1. Aciona o Módulo MOS (sinal HIGH - 5V - liga a chave de 12V)
     digitalWrite(lockPin, HIGH);
+
+    #ifdef DEBUG_LOCK
     Serial.println("Ativando tranca");
+    #endif
 
     // 2. Mantém a tranca acionada por 1 segundo (Pulso de segurança)
-    // ATENÇÃO: Este pulso deve ser CURTO (1000ms = 1 segundo). Se for muito longo, 
-    // a tranca eletromagnética (solenoide) pode superaquecer e queimar.
+    // ATENÇÃO: Este pulso deve ser CURTO (1000ms = 1 segundo). Se for muito longo, a solenoide pode aquecer e queimar
+
     delay(1000); 
     // 3. Desliga o Módulo MOS (sinal LOW - 0V - desliga a chave de 12V)
     digitalWrite(lockPin, LOW);
-      Serial.println("Desativando tranca");
+    #ifdef DEBUG_LOCK
+    Serial.println("Desativando tranca");
+    #endif
+      
 }
 
 
@@ -104,7 +121,7 @@ void startRTC(){
     while(1);
   }
 
-  Serial.println("RTC encontrado");
+  Serial.println(F("RTC encontrado"));
   rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
 }
 
@@ -119,6 +136,14 @@ void updateCurrentTime() {
   currentMonth = now.month();
   currentYear = now.year() % 100; 
 
+  
+  #ifdef SCHEDULEDMODE
+     if (currentHour > TARGET_HOUR && hasExecutedToday) {
+      hasExecutedToday = false;
+    }
+  #endif
+
+
   #ifdef DEBUG_RTC
   // DEBUG: Confirma que a leitura do RTC está funcionando
   Serial.print("RTC: ");
@@ -131,42 +156,65 @@ void updateCurrentTime() {
 }
 
 
-
-void startEthernet(){
-  Serial.println("Iniciando Ethernet...");
+void startNetworkSetup(){
+  Serial.println(F("Iniciando Ethernet..."));
   Ethernet.begin(mac, ip);
   delay(1000);
+ 
+  #ifdef DEBUG_TCP
+  Serial.print(F("IP Local: "));
+  Serial.println(Ethernet.localIP());
+  #endif
+}
+
+bool connectToServer(){
+
+ if(client.connected()) return true; 
+ 
+ #ifdef DEBUG_TCP
+ Serial.print(F("Tentando conectar a "));
+ Serial.print(server);
+ Serial.print(F(" na porta "));
+ Serial.println(port);
+ #endif
+
   if(client.connect(server, port)){
     #ifdef DEBUG_TCP
-    Serial.println("Conectado ao servidor!");
+    Serial.println(F("Conectado ao servidor!"));
     #endif
-
+    return true;
   } else {
     #ifdef DEBUG_TCP
-    Serial.println("Falha na conexao");
+    Serial.println(F("Falha na conexao"));
     #endif
-    
+    return false;
   }
 }
 
 void handleDisconnect(){
   if(!client.connected()){
     #ifdef DEBUG_TCP
-    Serial.println("Desconectado. Reconectando...");
+    Serial.println(F("Desconectado. Reconectando..."));
     #endif
     client.stop();
     delay(1000);
-    startEthernet();
+    connectToServer();
   }
 }
 
 void processAndSavePacket(char* data) {
     // Se a string de entrada for a tag <CLEAN>, execute a limpeza
-    if (strcmp(data, cleanTag) == 0) {
-        if (SD.exists(permissionFile)) {
-            SD.remove(permissionFile);
+    char cleanTagSRAM[cleanTagLen + 1];
+    strcpy_P(cleanTagSRAM, cleanTag);
+    char permissionFileSRAM[permissionFileLen + 1];
+    strcpy_P(permissionFileSRAM, permissionFile);
+
+
+    if (strcmp(data, cleanTagSRAM) == 0) {
+        if (SD.exists(permissionFileSRAM)) {
+            SD.remove(permissionFileSRAM);
             #ifdef DEBUG_TCP
-            Serial.println("Arquivo per.txt apagado.");
+            Serial.println(F("Arquivo per.txt apagado."));
             #endif
           
         }
@@ -179,12 +227,10 @@ void processAndSavePacket(char* data) {
         return;
     }
     
-    // --- LÓGICA DE SALVAR DADOS (Novo formato sem 'index') ---
     
-    // CORRIGIDO: Verifica se o objeto File é válido. 
     // Se não for válido (fechado ou falhou ao abrir), tenta reabri-lo.
     if (!permFile) { 
-        permFile = SD.open(permissionFile, FILE_WRITE);
+        permFile = SD.open(permissionFileSRAM, FILE_WRITE);
     }
     
     if (permFile) {
@@ -198,9 +244,8 @@ void processAndSavePacket(char* data) {
 
       
     } else {
-
         #ifdef DEBUG_TCP
-        Serial.println("ERRO: Falha ao abrir/escrever no arquivo de permissoes.");
+        Serial.println(F("ERRO: Falha ao abrir/escrever no arquivo de permissoes."));
         #endif
     }
 }
@@ -217,10 +262,13 @@ void handleEthernetCommunication(){
       incomingBuffer[dataPointer] = '\0'; // Termina a C-string
     }
 
-    char* cleanPtr = strstr(incomingBuffer, cleanTag);
+    char cleanTagSRAM[cleanTagLen + 1];
+    strcpy_P(cleanTagSRAM, cleanTag);
+
+    char* cleanPtr = strstr(incomingBuffer, cleanTagSRAM);
     if (cleanPtr != NULL) {
     
-        processAndSavePacket(cleanTag); 
+        processAndSavePacket(cleanTagSRAM); 
         short cleanStartIndex = cleanPtr - incomingBuffer;
         short remainingLen = dataPointer - (cleanStartIndex + cleanTagLen);
         
@@ -230,10 +278,37 @@ void handleEthernetCommunication(){
         continue;
     }
 
+    char finalTagSRAM[finalTagLen + 1];
+    strcpy_P(finalTagSRAM, finalTag);
+
+    char* finalPtr = strstr(incomingBuffer, finalTagSRAM);
+    if (finalPtr != NULL) {
+        // Tag de finalização encontrada! Executa a lógica de parada requerida.
+        #ifdef SCHEDULEDMODE
+          hasExecutedToday = true;
+          client.stop();
+        #endif
+        
+        // Opcional: Limpa o buffer para evitar processamento acidental
+        dataPointer = 0;
+        incomingBuffer[0] = '\0';
+
+          #ifdef DEBUG_TCP
+          Serial.print(F("Tag final recebida"));
+          #endif
+        // Termina a comunicação e sai da função imediatamente
+        continue;
+    }
+
+    char startTagSRAM[startTagLen + 1];
+    strcpy_P(startTagSRAM, startTag);
+
+    char endTagSRAM[endTagLen + 1];
+    strcpy_P(endTagSRAM, endTag);
 
     // Procura por <START> e <END> no buffer usando C-strings
-    char* startPtr = strstr(incomingBuffer, startTag);
-    char* endPtr = strstr(incomingBuffer, endTag);
+    char* startPtr = strstr(incomingBuffer, startTagSRAM);
+    char* endPtr = strstr(incomingBuffer, endTagSRAM);
     
     // Se um pacote completo foi encontrado
     if (startPtr != NULL && endPtr != NULL && endPtr > startPtr) {
@@ -249,8 +324,6 @@ void handleEthernetCommunication(){
       int remainingLen = strlen(endPtr + endTagLen);
       memmove(incomingBuffer, endPtr + endTagLen, remainingLen + 1);
       dataPointer = remainingLen;
-
-
     }
     
     // Limpeza de buffer de segurança para evitar estouro de memória
@@ -259,15 +332,17 @@ void handleEthernetCommunication(){
         dataPointer = 0;
     }
   } 
+
 }
 
 bool validatePin(const char* pin) {
     
     // CRÍTICO: Se houver dados de rede, interrompa a validacao para priorizar
     // a comunicação (limpeza e envio de novos dados).
+    
     if (client.available() > 0) {
         #ifdef DEBUG_PIN_VALIDATION
-        Serial.println("DEBUG: Rede ativa. Pulando validacao de PIN.");
+        Serial.println(F("DEBUG: Rede ativa. Pulando validacao de PIN."));
         #endif
         // Retorna FALSE para negar o acesso enquanto a rede está ocupada.
         return false;
@@ -285,19 +360,22 @@ bool validatePin(const char* pin) {
     if (permFile) {
         permFile.close();
     }
+
+    char permissionFileSRAM[permissionFileLen + 1];
+    strcpy_P(permissionFileSRAM, permissionFile );
     
     // 2. Abre o arquivo para leitura
-    permFile = SD.open(permissionFile, FILE_READ);
+    permFile = SD.open(permissionFileSRAM, FILE_READ);
     
     if (!permFile) {
       
         #ifdef DEBUG_PIN_VALIDATION
-        Serial.println("DEBUG: Erro ao abrir arquivo para leitura.");
+        Serial.println(F("DEBUG: Erro ao abrir arquivo para leitura."));
         #endif
         return false;
     }
     
-    char lineBuffer[64];
+    char lineBuffer[32];
     short bufferPointer = 0;
     
     while (permFile.available()) {
@@ -313,19 +391,15 @@ bool validatePin(const char* pin) {
             lineBuffer[bufferPointer] = '\0'; 
             
             #ifdef DEBUG_PIN_VALIDATION
-            Serial.print("DEBUG: Linha lida: ");
+            Serial.print(F("DEBUG: Linha lida: "));
             Serial.println(lineBuffer);
             #endif
 
             // --- INICIO DA EXTRAÇÃO E VALIDAÇÃO ---
             
-            // Fazemos uma cópia da linha, pois strtok altera a string original
-            char tempLine[64];
-            strncpy(tempLine, lineBuffer, sizeof(tempLine) - 1);
-            tempLine[sizeof(tempLine) - 1] = '\0';
 
             // 1. EXTRAI E VALIDA O PIN
-            char* storedPinStr = strtok(tempLine, ",");
+            char* storedPinStr = strtok(lineBuffer, ",");
             
             if (storedPinStr) {
                 
@@ -333,7 +407,7 @@ bool validatePin(const char* pin) {
                 if (strcmp(storedPinStr, pin) == 0) {
                      
                     #ifdef DEBUG_PIN_VALIDATION
-                    Serial.println("DEBUG: PIN Encontrado. Verificando Horário.");
+                    Serial.println(F("DEBUG: PIN Encontrado. Verificando Horário."));
                     #endif
                     
                     // 2. EXTRAI OS CAMPOS DE TEMPO E DATA
@@ -363,9 +437,9 @@ bool validatePin(const char* pin) {
                     if (dateMatch) {
                         
                         // B) VALIDAÇÃO DE HORA
-                        long currentTotalMins = currentHour * 60L + currentMinute;
-                        long startTotalMins = startHour * 60L + startMinute;
-                        long endTotalMins = endHour * 60L + endMinute;
+                        short currentTotalMins = currentHour * 60L + currentMinute;
+                        short startTotalMins = startHour * 60L + startMinute;
+                        short endTotalMins = endHour * 60L + endMinute;
 
                         bool timeMatch = false;
 
@@ -391,19 +465,19 @@ bool validatePin(const char* pin) {
                             validationResult = true; 
                   
                             #ifdef DEBUG_PIN_VALIDATION
-                            Serial.println("DEBUG: TEMPO E PIN SUCESSO! Acesso Concedido.");
+                            Serial.println(F("DEBUG: TEMPO E PIN SUCESSO! Acesso Concedido."));
                             #endif
                             break; // Sai do loop principal
                         } else {
                           
                             #ifdef DEBUG_PIN_VALIDATION
-                            Serial.print("DEBUG: PIN OK, mas FORA DO TEMPO.");
+                            Serial.print(F("DEBUG: PIN OK, mas FORA DO TEMPO."));
                             #endif
                         }
                     } else {
                     
                         #ifdef DEBUG_PIN_VALIDATION
-                        Serial.println("DEBUG: PIN OK, mas FORA DA DATA. Continuando a busca.");
+                        Serial.println(F("DEBUG: PIN OK, mas FORA DA DATA. Continuando a busca."));
                         #endif
                     }
                 }
@@ -425,7 +499,7 @@ bool validatePin(const char* pin) {
     }
     
     // 4. Reabre o arquivo para escrita/append
-    permFile = SD.open(permissionFile, FILE_WRITE);
+    permFile = SD.open(permissionFileSRAM, FILE_WRITE);
 
     #ifdef DEBUG_PIN_VALIDATION
     if (validationResult) {
@@ -486,13 +560,15 @@ void removeLastKey(){
 }
 
 void startValidation(){
-  updateCurrentTime();
-  bool result =validatePin(displayfeedback);
+ 
+  bool result = validatePin(displayfeedback);
   Serial.println(result);
-  //pinMode(pinled, OUTPUT);
-  //digitalWrite(pinled, HIGH);
-  //delay(3000);
-  //digitalWrite(pinled, LOW);
+
+  if(result){ 
+    #ifdef LOCK_ON
+    activateLock();
+    #endif
+  }
 }
 
 void clearFeedback(){
@@ -516,21 +592,29 @@ void setup() {
   delay(1500);
 
   #ifdef TCP_ON
-  startEthernet();
+  startNetworkSetup();
   #endif
 }
 
 void loop() {
   #ifdef TCP_ON
-  handleEthernetCommunication();
-  handleDisconnect();
+    #ifdef SCHEDULEDMODE
+      if (currentHour == TARGET_HOUR && !hasExecutedToday) {
+          if (connectToServer()) { 
+              handleEthernetCommunication();   
+            }
+          }
+      #else
+      handleEthernetCommunication();
+      handleDisconnect(); 
+      #endif
   #endif
-
-  delay(5000);
-  activateLock();
-
 
   #ifdef KEYBOARD_ON
   callkeypadInput();
+  #endif
+
+  #ifdef RTC_ON
+  updateCurrentTime();
   #endif
 }
