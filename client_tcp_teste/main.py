@@ -5,12 +5,12 @@ import json
 import itertools
 from datetime import datetime, timedelta
 
-HOST = "192.168.0.103"
+HOST = "10.12.2.195"
 PORT = 5000
 
 # Horário comercial para permitir o envio de agendamentos ao Arduino
-START_HOUR = 11
-END_HOUR = 14 
+START_HOUR = 8
+END_HOUR = 23
 
 def is_scheduled_hour():
     """Verifica se a hora atual está dentro do horário comercial definido."""
@@ -72,7 +72,7 @@ def generate_schedules():
             'pincode': current_pin_id, 
             'startHour': 8,
             'startMinute': 0,
-            'endHour': 13,
+            'endHour': 21,
             'endMinute': 0,
             'day': day,
             'month': month,
