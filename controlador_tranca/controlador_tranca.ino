@@ -16,7 +16,7 @@
 #define KEYBOARD_ON
 #define SDCARD_ON
 #define LOCK_ON
-#define SCHEDULEDMODE
+//#define SCHEDULEDMODE
 
 //Imports para trabalhar com SD Card
 #include <SPI.h>
@@ -48,8 +48,8 @@ byte currentYear;
  
 //Ethernet
 byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED }; 
-IPAddress ip(192,168,0,124);                        //IP Local Arduino
-IPAddress server(192,168,0,103);                    //IP Servidor Python
+IPAddress ip(10,12,2,196);                        //IP Local Arduino
+IPAddress server(10,12,2,195);   //10.12.2.195               //IP Servidor Python
 short port = 5000;
 EthernetClient client;
 
