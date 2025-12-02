@@ -5,7 +5,7 @@ import json
 import itertools
 from datetime import datetime, timedelta
 
-HOST = "10.12.2.195"
+HOST = "192.168.0.106"
 PORT = 5000
 
 # Horário comercial para permitir o envio de agendamentos ao Arduino
@@ -72,7 +72,7 @@ def generate_schedules():
             'pincode': current_pin_id, 
             'startHour': 8,
             'startMinute': 0,
-            'endHour': 21,
+            'endHour': 22,
             'endMinute': 0,
             'day': day,
             'month': month,

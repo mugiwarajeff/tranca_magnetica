@@ -16,6 +16,7 @@
 #define KEYBOARD_ON
 #define SDCARD_ON
 #define LOCK_ON
+#define LCD_ON
 //#define SCHEDULEDMODE
 
 //Imports para trabalhar com SD Card
@@ -32,6 +33,10 @@
 #include <Wire.h>
 #include <RTClib.h>
 
+//Import para display LCD
+#include <LiquidCrystal_I2C.h> //instalar  LiquidCrystal I2C
+#include <string.h>
+
 RTC_DS3231 rtc; 
 
 byte currentHour;   
@@ -39,6 +44,9 @@ byte currentMinute;
 byte currentDay;    
 byte currentMonth;  
 byte currentYear;
+
+//LCD Controll
+LiquidCrystal_I2C lcd(0x27, 16, 1);
 
 #ifdef SCHEDULEDMODE
     bool hasExecutedToday = false; 
@@ -48,8 +56,8 @@ byte currentYear;
  
 //Ethernet
 byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED }; 
-IPAddress ip(10,12,2,196);                        //IP Local Arduino
-IPAddress server(10,12,2,195);   //10.12.2.195               //IP Servidor Python
+IPAddress ip(192,168,0,110);                        //IP Local Arduino
+IPAddress server(192,168,0,106);   //192.168.0.106             //IP Servidor Python
 short port = 5000;
 EthernetClient client;
 
@@ -99,7 +107,7 @@ void activateLock() {
     digitalWrite(lockPin, HIGH);
 
     #ifdef DEBUG_LOCK
-    Serial.println("Ativando tranca");
+    Serial.println(F("Ativando tranca"));
     #endif
 
     // 2. Mantém a tranca acionada por 1 segundo (Pulso de segurança)
@@ -109,15 +117,28 @@ void activateLock() {
     // 3. Desliga o Módulo MOS (sinal LOW - 0V - desliga a chave de 12V)
     digitalWrite(lockPin, LOW);
     #ifdef DEBUG_LOCK
-    Serial.println("Desativando tranca");
+    Serial.println(F("Desativando tranca"));
     #endif
       
 }
 
+void startLCD(){
+
+  Serial.println(F("Iniciando LCD"));
+  lcd.init();      // Inicializa o hardware do PCF8574
+  lcd.backlight(); // Liga a luz de fundo
+  lcd.clear();
+  lcd.setCursor(1,0); //linha 1 coluna 1
+  
+  lcd.print(F("Sistema Iniciando..."));
+  delay(1500);
+  lcd.clear();
+  lcd.print(F("Pin: "));
+}
 
 void startRTC(){
   if(!rtc.begin()){
-    Serial.println("RTC não encontrado");
+    Serial.println(F("RTC não encontrado"));
     while(1);
   }
 
@@ -516,11 +537,11 @@ void startSDCard(){
   sdBeginResult = SD.begin(sdCardPin);
 
   if(!sdBeginResult){
-     Serial.println("Falha ao Iniciar SD Card");
+     Serial.println(F("Falha ao Iniciar SD Card"));
     return;
   }
 
-  Serial.println("Sucesso ao Iniciar SD Card");
+  Serial.println(F("Sucesso ao Iniciar SD Card"));
 }
 
 
@@ -534,25 +555,46 @@ void callkeypadInput(){
   }
 }
 
+void updateDisplay(char* msg){
+  lcd.clear();
+  lcd.setCursor(0, 0);
+
+
+  // Verifica se a string (copiada na RAM) está vazia (strlen usa RAM)
+  if (strlen(msg) == 0) {
+    lcd.print("Pin: ");
+  } else {
+  lcd.print(msg);
+  }
+  
+}
+
 void handleKey(char key){
     if(key == '#'){
+      updateDisplay("validando...");
       startValidation();
       clearFeedback();
+    
       return;
     }
 
     if(key == '*'){
       removeLastKey();
+      updateDisplay(displayfeedback);
       return;
     }
 
     if((feedbackPointer +1) == maxDisplayNum){
+      
       return;
     }
 
     displayfeedback[feedbackPointer] = key;
     feedbackPointer++;
+    updateDisplay(displayfeedback);
 }
+
+
 
 void removeLastKey(){
   feedbackPointer--;
@@ -568,6 +610,14 @@ void startValidation(){
     #ifdef LOCK_ON
     activateLock();
     #endif
+
+    updateDisplay("Tranca Liberada!");
+    delay(2000);
+    updateDisplay("");
+  } else {
+    updateDisplay("Pin Invalido!");
+    delay(2000);
+    updateDisplay("");
   }
 }
 
@@ -580,14 +630,21 @@ void setup() {
   Serial.begin(9600);
   pinMode(lockPin, OUTPUT);
   digitalWrite(lockPin, LOW);
+  Wire.begin();
 
   #ifdef SDCARD_ON
   startSDCard();
   #endif
 
+  #ifdef LCD_ON
+  startLCD();
+  #endif
+
+
   #ifdef RTC_ON
   startRTC();
   #endif
+
 
   delay(1500);
 
