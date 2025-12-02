@@ -46,7 +46,7 @@ byte currentMonth;
 byte currentYear;
 
 //LCD Controll
-LiquidCrystal_I2C lcd(0x27, 16, 1);
+LiquidCrystal_I2C lcd(0x27, 16, 2);
 
 #ifdef SCHEDULEDMODE
     bool hasExecutedToday = false; 
