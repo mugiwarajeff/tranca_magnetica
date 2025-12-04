@@ -35,7 +35,6 @@
 
 //Import para display LCD
 #include <LiquidCrystal_I2C.h> //instalar  LiquidCrystal I2C
-#include <string.h>
 
 RTC_DS3231 rtc; 
 
@@ -64,6 +63,7 @@ EthernetClient client;
 // Variáveis para receber dados do servidor
 char incomingBuffer[38];
 short dataPointer = 0;
+bool inSync = false;
 const char startTag[] PROGMEM = "<START>"; //lembrar de colocar planilha de solução
 const char endTag[] PROGMEM = "<END>";
 const char cleanTag[] PROGMEM = "<CLEAN>";
@@ -277,6 +277,11 @@ void handleEthernetCommunication(){
   while (client.available()) {
     char c = client.read();
 
+    
+     lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print(F("Sincronizando..."));
+    inSync = true;
     // Adiciona o caractere ao buffer
     if (dataPointer < sizeof(incomingBuffer) - 1) {
       incomingBuffer[dataPointer++] = c;
@@ -318,7 +323,13 @@ void handleEthernetCommunication(){
           Serial.print(F("Tag final recebida"));
           #endif
         // Termina a comunicação e sai da função imediatamente
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print(F("Pin: "));
+        inSync = false;
         continue;
+
+
     }
 
     char startTagSRAM[startTagLen + 1];
@@ -352,7 +363,11 @@ void handleEthernetCommunication(){
         memset(incomingBuffer, 0, sizeof(incomingBuffer));
         dataPointer = 0;
     }
+
+    
   } 
+
+ 
 
 }
 
@@ -547,6 +562,10 @@ void startSDCard(){
 
 
 void callkeypadInput(){
+
+  if(inSync){
+    return;
+  }
   char key = keypad.getKey();
 
   if(key){
@@ -555,23 +574,12 @@ void callkeypadInput(){
   }
 }
 
-void updateDisplay(char* msg){
-  lcd.clear();
-  lcd.setCursor(0, 0);
-
-
-  // Verifica se a string (copiada na RAM) está vazia (strlen usa RAM)
-  if (strlen(msg) == 0) {
-    lcd.print("Pin: ");
-  } else {
-  lcd.print(msg);
-  }
-  
-}
-
 void handleKey(char key){
     if(key == '#'){
-      updateDisplay("validando...");
+      
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print(F("validando..."));
       startValidation();
       clearFeedback();
     
@@ -580,7 +588,10 @@ void handleKey(char key){
 
     if(key == '*'){
       removeLastKey();
-      updateDisplay(displayfeedback);
+       lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print(displayfeedback);
+     
       return;
     }
 
@@ -591,7 +602,10 @@ void handleKey(char key){
 
     displayfeedback[feedbackPointer] = key;
     feedbackPointer++;
-    updateDisplay(displayfeedback);
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print(displayfeedback);
+  
 }
 
 
@@ -611,13 +625,25 @@ void startValidation(){
     activateLock();
     #endif
 
-    updateDisplay("Tranca Liberada!");
+  
+        lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print(F("Tranca Liberada!"));
     delay(2000);
-    updateDisplay("");
+ 
+        lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print(F("Pin: "));
   } else {
-    updateDisplay("Pin Invalido!");
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print(F("Pin Invalido!"));
+
     delay(2000);
-    updateDisplay("");
+ 
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print(F("Pin: "));
   }
 }
 
